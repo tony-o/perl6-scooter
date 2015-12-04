@@ -1,0 +1,2 @@
+1..10 seconds 50% run echo 'what 1 to 10 seconds @ 50%'
+every 1 to 1 minutes 100% run echo '1 minute has passed'

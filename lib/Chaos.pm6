@@ -4,7 +4,7 @@ use Chaos::Grammar;
 
 class Chaos does Module::Does[<Chaos::Doer>] {
   has Bool    $.debug-output is rw = False;
-  has Promise $!kill .=new;
+  has Promise $!killer-b .=new;
   has @!config;
   has @!proms;
 
@@ -14,8 +14,8 @@ class Chaos does Module::Does[<Chaos::Doer>] {
     for $file.IO.lines -> $l {
       my $d = Chaos::Grammar.parse: $l;
       my %d = 
-        min-period  => $d<period><min>.Str,
-        max-period  => $d<period><max>.Str,
+        min-period  => $d<period><min>.Int,
+        max-period  => $d<period><max>.Int,
         period      => $d<period><measurement><base>.Str,
         probability => $d<chance><odds>
                          ??   100 * $d<chance><odds><xin>.subst(',','').Int
@@ -23,7 +23,9 @@ class Chaos does Module::Does[<Chaos::Doer>] {
                          !! $d<chance><percentage>.Str.subst('%',''),
         action      => $d<action>.Str,
       ;
-      %d<handlers> = %!base-types<Chaos::Doer>.map({ try .handles(%d<action>) }).grep(*.so);
+      %d<handlers> = %!base-types<Chaos::Doer>\
+                       .map({ try { .handles(%d<action>); $_; } })\
+                       .grep({ $_ !~~ Nil });
       @!config.push: %d;
       print "$l\n{
         @keys.map({
@@ -37,14 +39,17 @@ class Chaos does Module::Does[<Chaos::Doer>] {
   }
 
   method begin {
-    for ^@!config -> $c {
-      $.requeue($c);
+    start { 
+      CATCH { default { .say; } }
+      for ^@!config -> $c {
+        $.requeue($c);
+      }
     }
-    await $!kill;    
+    await $!killer-b while $!killer-b ~~ PromiseStatus::Planned; 
   }
 
   method stop {
-    $!kill.keep;
+    $!killer-b.keep;
   }
 
   method requeue(Int $index) {
@@ -59,17 +64,18 @@ class Chaos does Module::Does[<Chaos::Doer>] {
       };
       "[MSG $index] Promise scheduled in $x".say if $.debug-output;
       await Promise.in($x);
-      $.process($index);
+      $.process($index, $x);
       $.requeue($index);
+      CATCH { default { .say; } }
     };
   }
 
-  method process(Int $index) {
+  method process(Int $index, $interval) {
     "[MSG $index] Processing..".say if $.debug-output;
     my $c = @!config[$index];
-    if rand < $c<probability> {
-      $c<handlers>.cache.perl.say;
-      $_.cause-chaos($c<action>) for $c<handlers>.cache;
+    my $p = rand * 100;
+    if $p < $c<probability> {
+      $_.cause-chaos($c<action>, :$interval, :probability($p)) for $c<handlers>.cache.values;
     }
     CATCH { default { .say; } }
   }
